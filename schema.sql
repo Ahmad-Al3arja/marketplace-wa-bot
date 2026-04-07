@@ -3,6 +3,7 @@ CREATE TABLE sellers (
   phone_number TEXT PRIMARY KEY,
   name TEXT,
   last_product_sku TEXT, -- Tracks the last product the seller interacted with
+  pending_action TEXT,   -- Tracks the active button (ADD/REMOVE)
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
