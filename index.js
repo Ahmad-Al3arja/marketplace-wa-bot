@@ -67,24 +67,63 @@ async function handleIncomingMessage(from, message, profileName) {
 
     if (type === 'image') {
       const mediaId = message.image.id;
-      // 2. Identify Product by Image (In a real bot, we match mediaId or use AI)
-      // For now, we search for a product that has this image_url (mediaId)
-      let { data: product, error: pErr } = await supabase.from('products').select('*').eq('image_url', mediaId).single();
+      const caption = message.image.caption ? message.image.caption.trim() : null;
       
-      if (pErr) {
-        // Mock matching logic: If no image match, let's assume the first shoe for demo
-        let { data: firstProd } = await supabase.from('products').select('*').limit(1).single();
-        product = firstProd;
+      let product;
+      let isNew = false;
+
+      if (caption) {
+        // 1. Try to find by name/caption first for this seller
+        const { data: existing } = await supabase
+          .from('products')
+          .select('*')
+          .eq('seller_phone', from)
+          .eq('name', caption)
+          .single();
+        
+        if (existing) {
+          product = existing;
+          await supabase.from('products').update({ image_url: mediaId }).eq('sku', product.sku);
+        } else {
+          // 2. Auto-Register: Create new product
+          const newSku = `SKU-${caption.replace(/\s+/g, '-').toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+          const { data: created, error: createErr } = await supabase
+            .from('products')
+            .insert([{ 
+                sku: newSku, 
+                name: caption, 
+                image_url: mediaId, 
+                seller_phone: from,
+                stock: 0 
+            }])
+            .select()
+            .single();
+          
+          if (createErr) throw createErr;
+          product = created;
+          isNew = true;
+        }
+      } else {
+        // 3. Simple Identification: Search for product with this image_url
+        const { data: matched } = await supabase.from('products').select('*').eq('image_url', mediaId).single();
+        product = matched;
+        
+        if (!product) {
+          // Mock/Fallback for demo
+          const { data: first } = await supabase.from('products').select('*').limit(1).single();
+          product = first;
+        }
       }
 
       if (product) {
-        // 3. Set Context: Save this as the "active" product for the seller
+        // 4. Set Context
         await supabase.from('sellers').update({ last_product_sku: product.sku }).eq('phone_number', from);
         
-        const text = `👟 *Product Identified: ${product.name}*\nStock: ${product.stock}\n\nSend *+* or *-* followed by a number to update (e.g. \`+10\` or \`-2\`)`;
+        const statusText = isNew ? `✅ *New Product Registered!*` : `👟 *Product Identified*`;
+        const text = `${statusText}\n*Name:* ${product.name}\n*SKU:* ${product.sku}\n*Stock:* ${product.stock}\n\nSend \`+5\` or \`-2\` to update!`;
         await sendWhatsAppMessage(from, text);
       } else {
-        await sendWhatsAppMessage(from, "📸 I don't recognize this product image. Please send the SKU code or link this image to a product first.");
+        await sendWhatsAppMessage(from, "📸 I don't recognize this image. To register it, send the photo again with a *Caption* (e.g., 'Blue Shoes').");
       }
 
     } else if (type === 'text') {
